@@ -22,8 +22,8 @@
               bypass it by entering then exiting service mode;
     - sgt24h: has input analog issues, steering doesn't center when neutral,
       gas and brake pedals pulses instead of being fixed;
-	- vcop2: stage select has tilemap priority issue, tilemap B (city model) has priority bit set,
-	         yet it should appear underneath tilemap A ("shoot to select") which does not
+    - vcop2: stage select has tilemap priority issue, tilemap B (city model) has priority bit set,
+             yet it should appear underneath tilemap A ("shoot to select") which does not
 
     Notes:
     - some analog games can be calibrated in service mode via volume control item ...
@@ -72,6 +72,12 @@
 #include "emu.h"
 #include "model2.h"
 
+#include "315_5296.h"
+#include "315_5649.h"
+#include "model1io.h"
+#include "model1io2.h"
+#include "segaic24.h"
+
 #include "cpu/i960/i960.h"
 #include "cpu/m68000/m68000.h"
 #include "cpu/z80/z80.h"
@@ -81,12 +87,8 @@
 #include "machine/mb8421.h"
 #include "machine/msm6253.h"
 #include "machine/nvram.h"
-#include "315_5296.h"
-#include "315_5649.h"
-#include "model1io.h"
-#include "model1io2.h"
 #include "sound/ymopn.h"
-#include "segaic24.h"
+
 #include "speaker.h"
 
 #include "model1io2.lh"
@@ -138,13 +140,23 @@ TIMER_DEVICE_CALLBACK_MEMBER(model2_state::model2_timer_cb)
 	m_timerrun[TNum] = 0;
 }
 
+TIMER_CALLBACK_MEMBER(model2_state::check_sound_irq)
+{
+	const u32 line = 1 << 10;
+	if ((m_uart->status_r() & 0x03) && (m_intena & line))
+	{
+		m_intreq |= line;
+		irq_update();
+	}
+}
+
 void model2_state::machine_start()
 {
 	// initialize custom debugger pool, @see machine/model2.cpp
 	debug_init();
 
 	m_lamps.resolve();
-	
+
 	save_item(NAME(m_intreq));
 	save_item(NAME(m_intena));
 	save_item(NAME(m_coproctl));
@@ -165,6 +177,9 @@ void model2_state::machine_start()
 
 	save_item(NAME(m_geo_write_start_address));
 	save_item(NAME(m_geo_read_start_address));
+
+	m_irq_delay_timer = timer_alloc(FUNC(model2_state::check_sound_irq), this);
+	m_irq_delay_timer->adjust(attotime::never);
 }
 
 void model2_tgp_state::machine_start()
@@ -921,12 +936,8 @@ void model2_state::irq_enable_w(offs_t offset, u32 data, u32 mem_mask)
 {
 	COMBINE_DATA(&m_intena);
 
-	const u32 line = 1 << 10;
-	if ((m_uart->status_r() & 0x03) && (m_intena & line))
-	{
-		m_intreq |= line;
-		irq_update();
-	}
+	// delay sound IRQ check by 2 cycles; vcop2 needs this
+	m_irq_delay_timer->adjust(attotime::from_nsec(80));
 }
 
 void model2_state::irq_update()
@@ -1176,81 +1187,81 @@ u8 model2_state::lightgun_offscreen_r(offs_t offset)
 //**************************************************************************
 
 /*
-	Daytona
-	7-------  leader lamp
-	-6------  vr4 lamp
-	--5-----  vr3 lamp
-	---4----  vr2 lamp
-	----3---  vr1 lamp
-	-----2--  start lamp
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Daytona
+    7-------  leader lamp
+    -6------  vr4 lamp
+    --5-----  vr3 lamp
+    ---4----  vr2 lamp
+    ----3---  vr1 lamp
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Desert
-	7-------  cannon motor
-	-6------  machine gun motor
-	--5-----  vr1 lamp
-	---4----  vr2 lamp
-	----3---  vr3 lamp
-	-----2--  start lamp
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Desert
+    7-------  cannon motor
+    -6------  machine gun motor
+    --5-----  vr1 lamp
+    ---4----  vr2 lamp
+    ----3---  vr3 lamp
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Vcop
-	7654----  unknown (not used?)
-	----32--  start lamps (always set together)
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Vcop
+    7654----  unknown (not used?)
+    ----32--  start lamps (always set together)
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Srallyc
-	7-------  leader lamp   
-	-6------  unknown
-	--5-----  vr lamp
-	---4----  unknown
-	----3---  unknown
-	-----2--  start lamp
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Srallyc
+    7-------  leader lamp
+    -6------  unknown
+    --5-----  vr lamp
+    ---4----  unknown
+    ----3---  unknown
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	STCC
-	7-------  unknown
-	-6------  unknown
-	--5-----  view 2 (zoom out) lamp  
-	---4----  view 1 (zoom in) lamp 
-	----3---  rev max lamp 
-	-----2--  start lamp 
-	------1-  coin counter 2
-	-------0  coin counter 1
+    STCC
+    7-------  unknown
+    -6------  unknown
+    --5-----  view 2 (zoom out) lamp
+    ---4----  view 1 (zoom in) lamp
+    ----3---  rev max lamp
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Indy500
-	7-------  race leader lamp 
-	-6------  unknown
-	--5-----  view 2 (zoom out) lamp
-	---4----  view 1 (zoom in) lamp 
-	----3---  unknown
-	-----2--  start lamp 
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Indy500
+    7-------  race leader lamp
+    -6------  unknown
+    --5-----  view 2 (zoom out) lamp
+    ---4----  view 1 (zoom in) lamp
+    ----3---  unknown
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Overrev
-	7-------  unknown
-	-6------  unknown
-	--5-----  view 2 lamp
-	---4----  view 1 lamp
-	----3---  unknown
-	-----2--  start lamp
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Overrev
+    7-------  unknown
+    -6------  unknown
+    --5-----  view 2 lamp
+    ---4----  view 1 lamp
+    ----3---  unknown
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 
-	Sgt24h
-	7-------  unknown
-	-6------  unknown
-	--5-----  view 2 lamp
-	---4----  view 1 lamp
-	----3---  unknown
-	-----2--  start lamp
-	------1-  coin counter 2
-	-------0  coin counter 1
+    Sgt24h
+    7-------  unknown
+    -6------  unknown
+    --5-----  view 2 lamp
+    ---4----  view 1 lamp
+    ----3---  unknown
+    -----2--  start lamp
+    ------1-  coin counter 2
+    -------0  coin counter 1
 */
 
 void model2_state::lamp_output_w(u8 data)
@@ -1306,7 +1317,7 @@ void model2o_state::model2o_mem(address_map &map)
 /* Daytona "To The MAXX" PIC protection simulation */
 u32 model2o_maxx_state::maxx_r(offs_t offset, u32 mem_mask)
 {
-	u32 *ROM = (u32 *)memregion("maincpu")->base();
+	u32 *ROM = &memregion("maincpu")->as_u32();
 
 	if (offset <= 0x1f/4)
 	{
@@ -1353,16 +1364,22 @@ void model2o_maxx_state::model2o_maxx_mem(address_map &map)
 
 u8 model2o_gtx_state::gtx_r(offs_t offset)
 {
-	u8 *ROM = memregion("prot_data")->base();
+	auto ROM = util::little_endian_cast<u8>(&m_prot_data[0]);
 
-	if(offset == 0xffffc) // disable protection ROM overlay (fallbacks to data rom?)
-		m_gtx_state = 2;
-	else if(offset == 0xff00c || offset == 0xf0003) // enable protection bank 0
-		m_gtx_state = 0;
-	else if(offset == 0xff000) // enable protection bank 1
-		m_gtx_state = 1;
+	int gtx_state;
+	if (offset == 0xffffc) // disable protection ROM overlay (fallbacks to data ROM?)
+		gtx_state = 2;
+	else if (offset == 0xff00c || offset == 0xf0003) // enable protection bank 0
+		gtx_state = 0;
+	else if (offset == 0xff000) // enable protection bank 1
+		gtx_state = 1;
+	else
+		gtx_state = m_gtx_state;
 
-	return ROM[m_gtx_state*0x100000+offset];
+	if (!machine().side_effects_disabled())
+		m_gtx_state = gtx_state;
+
+	return ROM[gtx_state * 0x100000 + offset];
 }
 
 void model2o_gtx_state::model2o_gtx_mem(address_map &map)
@@ -1374,7 +1391,7 @@ void model2o_gtx_state::model2o_gtx_mem(address_map &map)
 /* TODO: read by Sonic the Fighters (bit 1), unknown purpose */
 u32 model2_state::copro_status_r()
 {
-	if(m_coprocnt == 0)
+	if (m_coprocnt == 0)
 		return -1;
 
 	return 0;
@@ -7495,30 +7512,30 @@ ROM_END
 void model2_state::init_pltkids()
 {
 	// HACK: fix bug in program: it destroys the interrupt table and never fixes it
-	u32 *ROM = (u32 *)memregion("maincpu")->base();
+	u32 *ROM = &memregion("maincpu")->as_u32();
 	ROM[0x730/4] = 0x08000004;
 }
 
 void model2_state::init_zerogun()
 {
 	// HACK: fix bug in program: it destroys the interrupt table and never fixes it
-	u32 *ROM = (u32 *)memregion("maincpu")->base();
+	u32 *ROM = &memregion("maincpu")->as_u32();
 	ROM[0x700/4] = 0x08000004;
 }
 
 void model2_state::init_sgt24h()
 {
-//  u32 *ROM = (u32 *)memregion("maincpu")->base();
-//  ROM[0x56578/4] = 0x08000004;
+	//u32 *ROM = &memregion("maincpu")->as_u32();
+	//ROM[0x56578/4] = 0x08000004;
 	//ROM[0x5b3e8/4] = 0x08000004;
 }
 
 void model2_state::init_powsledm()
 {
-	u8 *ROM = (u8 *)memregion("maincpu")->base();
-	ROM[0x1571C] = 0x01; // Main mode
-	ROM[0x1584C] = 0x89; // set node ID 0x200 = main
-	ROM[0x1585D] = 0xFD; // inverted node ID
+	auto ROM = util::little_endian_cast<u8>(&memregion("maincpu")->as_u32());
+	ROM[0x1571c] = 0x01; // Main mode
+	ROM[0x1584c] = 0x89; // set node ID 0x200 = main
+	ROM[0x1585d] = 0xfd; // inverted node ID
 }
 
 u32 model2_state::doa_prot_r(offs_t offset, u32 mem_mask)
